@@ -36,6 +36,7 @@ enum Format {
     #[output("JavaScript")]
     Js,
     Ada,
+    Svelte,
     Dart,
     #[file_format("py")]
     Python,
@@ -68,7 +69,8 @@ fn count_lines_in_directory<T: AsRef<Path>>(path: T) -> Result<String, std::io::
 
 fn count_lines_in_file(file: &DirEntry) -> Result<FileData, std::io::Error> {
     let mut buf: [u8; _] = [0; IO_BUFSIZE + 1];
-    let name = &file.file_name();
+    let name = file.path();
+    // let name = &file.file_name();
     let mut current_file = File::open(&name).inspect_err(|error| {
         eprintln!(
             "could not open the file {}: {error}",
@@ -123,7 +125,7 @@ fn process_hashtable(table: &HashMap<Format, usize>) -> String {
     answer
 }
 fn main() -> Result<(), std::io::Error> {
-    let map = count_lines_in_directory(".")?;
+    let map = count_lines_in_directory("test")?;
     println!("{map}");
     Ok(())
 }
