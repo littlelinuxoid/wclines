@@ -1,6 +1,10 @@
+workspace = {members = ["wcl-proc-macros"]}
+
+
 [package]
 name = "wclines"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+wcl-proc-macros = {path = "./wcl-proc-macros"}
