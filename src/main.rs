@@ -2,10 +2,11 @@
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    fmt::Write,
+    fmt::Write as write,
     fs::{self, DirEntry, File},
-    io::Read,
+    io::{Read, Write},
     path::Path,
+    process::Stdio,
 };
 use wcl_proc_macros::Matcher;
 mod table;
@@ -125,6 +126,18 @@ fn process_hashtable(table: &HashMap<Format, usize>) -> String {
     answer
 }
 fn main() -> Result<(), std::io::Error> {
+    let child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("wc -l test/*")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()?;
+    println!("wc -l RESULTS:");
+    std::io::stdout().write_all(&child.stdout)?;
+    std::io::stdout().write_all(&child.stderr)?;
+
+    println!("---------------------------------------------");
+    println!("WCLINES RESULTS:");
     let map = count_lines_in_directory("test")?;
     println!("{map}");
     Ok(())
