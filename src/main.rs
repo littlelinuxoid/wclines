@@ -2,7 +2,7 @@
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    fmt::Write,
+    fmt::{Debug, Write as write},
     fs::{self, DirEntry, File},
     io::Read,
     path::Path,
@@ -20,7 +20,7 @@ enum Format {
     B,
     C,
     D,
-    #[output("Text File")]
+    #[output("Non-Code Text")]
     Txt,
     Java,
     #[file_format("rb")]
@@ -37,12 +37,19 @@ enum Format {
     Js,
     Ada,
     Svelte,
+    #[file_format("s")]
+    Assembly,
     Dart,
     #[file_format("py")]
     Python,
     #[output("TypeScript")]
     Ts,
     Other,
+    #[error_attr]
+    ErrorOccured {
+        message: String,
+        file: String,
+    },
 }
 
 #[derive(Debug)]
@@ -51,36 +58,49 @@ struct FileData {
     lines: usize,
 }
 
-fn count_lines_in_directory<T: AsRef<Path>>(path: T) -> Result<String, std::io::Error> {
-    let dir_contents = fs::read_dir(&path)?.map(|item| item.unwrap());
+fn count_lines_in_directory<T: AsRef<Path> + Debug>(path: T) -> String {
+    let dir_contents = match fs::read_dir(&path) {
+        Ok(dir) => dir.map(|item| item.unwrap()),
+        Err(ref e) => {
+            eprintln!("[ERROR] {:?}: {e}", path);
+            return "".to_string();
+        }
+    };
     let dir_contents = dir_contents.filter(|item| item.metadata().unwrap().is_file());
     // use hashmap, because why the fuck not?
     let mut result: HashMap<Format, usize> = HashMap::new();
 
     for file_desc in dir_contents {
-        let lines_count = count_lines_in_file(&file_desc)?;
+        let file_data = count_lines_in_file(&file_desc);
+        let lines = file_data.lines;
         result
-            .entry(lines_count.extension)
-            .and_modify(|val| *val += lines_count.lines)
-            .or_insert(lines_count.lines);
+            .entry(file_data.extension)
+            .and_modify(|val| *val += lines)
+            .or_insert(lines);
     }
-    Ok(process_hashtable(&result))
+    process_hashtable(&result)
 }
 
-fn count_lines_in_file(file: &DirEntry) -> Result<FileData, std::io::Error> {
+fn count_lines_in_file(file: &DirEntry) -> FileData {
     let mut buf: [u8; _] = [0; IO_BUFSIZE + 1];
     let name = file.path();
-    // let name = &file.file_name();
-    let mut current_file = File::open(&name).inspect_err(|error| {
-        eprintln!(
-            "could not open the file {}: {error}",
-            &name.to_str().unwrap()
-        );
-    })?;
+    let mut current_file = match File::open(&name) {
+        Ok(f) => f,
+        Err(ref e) => {
+            eprintln!("{}", e);
+            return FileData {
+                extension: Format::ErrorOccured {
+                    message: e.to_string(),
+                    file: name.to_str().unwrap().to_string(),
+                },
+                lines: 0,
+            };
+        }
+    };
 
     // main line counting logic goes here
     let mut lines_counter = 0;
-    while current_file.read(&mut buf)? > 0 {
+    while current_file.read(&mut buf).unwrap() > 0 {
         // try to skip ELF executables as it makes no sense to count lines in binary files
         // whatsoever.
         // This approach is dumb and barely extendible
@@ -88,9 +108,9 @@ fn count_lines_in_file(file: &DirEntry) -> Result<FileData, std::io::Error> {
         if buf[0..4] == ELF_SIGNATURE {
             break;
         }
-        for character in buf.map(|character: u8| character as char) {
+        for character in buf {
             match &character {
-                '\n' => lines_counter += 1,
+                b'\n' => lines_counter += 1,
                 _ => continue,
             }
         }
@@ -98,10 +118,10 @@ fn count_lines_in_file(file: &DirEntry) -> Result<FileData, std::io::Error> {
 
     // println!("{lines_counter} lines in file {}", name.to_str().unwrap());
 
-    Ok(FileData {
+    FileData {
         extension: get_file_ext(file.path().extension()),
         lines: lines_counter,
-    })
+    }
 }
 
 fn get_file_ext(ext: Option<&OsStr>) -> Format {
@@ -122,10 +142,23 @@ fn process_hashtable(table: &HashMap<Format, usize>) -> String {
     for (format, lines) in table {
         let _ = writeln!(answer, "{} files: {lines}", format.match_to_str());
     }
+
     answer
 }
-fn main() -> Result<(), std::io::Error> {
-    let map = count_lines_in_directory("test")?;
-    println!("{map}");
-    Ok(())
+fn main() {
+    // let child = std::process::Command::new("sh")
+    //     .arg("-c")
+    //     .arg("wc -l test/*")
+    //     .stdout(Stdio::piped())
+    //     .stderr(Stdio::piped())
+    //     .output()?;
+    // println!("wc -l RESULTS:");
+    // std::io::stdout().write_all(&child.stdout)?;
+    // std::io::stdout().write_all(&child.stderr)?;
+    //
+    // println!("---------------------------------------------");
+    let a = count_lines_in_directory("test");
+    let err = count_lines_in_directory("Laksjdlakjs");
+    println!("{a}");
+    println!("{err}");
 }

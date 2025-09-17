@@ -64,7 +64,7 @@ use syn::{DataEnum, parse_macro_input};
 /// ```
 ///
 ///
-#[proc_macro_derive(Matcher, attributes(file_format, output))]
+#[proc_macro_derive(Matcher, attributes(file_format, output, error_attr))]
 pub fn matcher_derive(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as syn::DeriveInput);
     let name = input.ident;
@@ -73,9 +73,17 @@ pub fn matcher_derive(item: TokenStream) -> TokenStream {
     } else {
         panic!("Enum-only macro!")
     };
+
     //maps enum variants to strings
     let match_arms_to_str = variants.iter().map(|variant| {
         let var_name = &variant.ident;
+        if var_name == "ErrorOccured" {
+            return quote! {
+                #name::ErrorOccured {message,file} => {
+                    Box::leak(format!("[ERROR] file {file}: {message}").into_boxed_str())
+                },
+            };
+        }
         let parsed_with_attr = variant.attrs.iter().find_map(|attribute| {
             if attribute.path().is_ident("output") {
                 attribute
@@ -87,16 +95,17 @@ pub fn matcher_derive(item: TokenStream) -> TokenStream {
             }
         });
         let var_str = parsed_with_attr.unwrap_or_else(|| var_name.to_string());
-
         quote! {
              #name::#var_name => #var_str,
         }
     });
     //maps strings to enum variants
-    let match_arms_rev = variants.iter().map(|variant| {
+    let match_arms_rev = variants.iter().filter_map(|variant| {
         let var_name = &variant.ident;
-        if var_name == "Other" {
-            quote! { _ => Ok(#name::#var_name), }
+        if var_name == "ErrorOccured" {
+            None
+        } else if var_name == "Other" {
+            Some(quote! { _ => Ok(#name::#var_name), })
         } else {
             let parsed_with_attr = variant.attrs.iter().find_map(|attribute| {
                 if attribute.path().is_ident("file_format") {
@@ -110,9 +119,9 @@ pub fn matcher_derive(item: TokenStream) -> TokenStream {
             });
             let var_str = parsed_with_attr.unwrap_or_else(|| var_name.to_string().to_lowercase());
 
-            quote! {
+            Some(quote! {
                 #var_str => Ok(#name::#var_name),
-            }
+            })
         }
     });
 
@@ -123,6 +132,7 @@ pub fn matcher_derive(item: TokenStream) -> TokenStream {
                     #(#match_arms_to_str)*
                 }
             }
+
         }
 
         impl std::str::FromStr for #name {
