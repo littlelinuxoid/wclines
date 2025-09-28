@@ -2,83 +2,68 @@
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    fmt::{Debug, Write as write},
+    fmt::{Debug, Write},
     fs::{self, DirEntry, File},
     io::Read,
-    path::Path,
+    path::{Path, PathBuf},
 };
-use wcl_proc_macros::Matcher;
+mod format;
 mod table;
+use format::Format;
 
 const IO_BUFSIZE: usize = 1024 * 256;
 const ELF_SIGNATURE: [u8; 4] = [0x7F, 0x45, 0x4C, 0x46];
 
-#[derive(Debug, Eq, PartialEq, Hash, Matcher)]
-enum Format {
-    #[file_format("rs")]
-    Rust,
-    B,
-    C,
-    D,
-    #[output("Non-Code Text")]
-    Txt,
-    Java,
-    #[file_format("rb")]
-    Ruby,
-    Json,
-    #[output("C++")]
-    Cpp,
-    #[file_format("cs")]
-    #[output("C#")]
-    CSharp,
-    #[file_format("hs")]
-    Haskell,
-    #[output("JavaScript")]
-    Js,
-    Ada,
-    Svelte,
-    #[file_format("s")]
-    Assembly,
-    Dart,
-    #[file_format("py")]
-    Python,
-    #[output("TypeScript")]
-    Ts,
-    Other,
-    #[error_attr]
-    ErrorOccured {
-        message: String,
-        file: String,
-    },
-}
-
-#[derive(Debug)]
 struct FileData {
     extension: Format,
+    path: PathBuf,
+
     lines: usize,
 }
+impl Default for FileData {
+    fn default() -> Self {
+        Self {
+            extension: Format::Other,
+            path: ".".into(),
+            lines: 0,
+        }
+    }
+}
 
-fn count_lines_in_directory<T: AsRef<Path> + Debug>(path: T) -> String {
+fn count_lines_recursive<T: AsRef<Path> + Debug + Into<PathBuf>>(
+    path: &T,
+) -> Option<HashMap<Format, usize>> {
     let dir_contents = match fs::read_dir(&path) {
         Ok(dir) => dir.map(|item| item.unwrap()),
         Err(ref e) => {
             eprintln!("[ERROR] {:?}: {e}", path);
-            return "".to_string();
+            return None;
         }
     };
-    let dir_contents = dir_contents.filter(|item| item.metadata().unwrap().is_file());
+    // IDEA:
+    // Split traversing into threads, probably?
     // use hashmap, because why the fuck not?
     let mut result: HashMap<Format, usize> = HashMap::new();
 
     for file_desc in dir_contents {
-        let file_data = count_lines_in_file(&file_desc);
-        let lines = file_data.lines;
-        result
-            .entry(file_data.extension)
-            .and_modify(|val| *val += lines)
-            .or_insert(lines);
+        let mdata = file_desc.metadata().unwrap();
+        if mdata.is_file() {
+            let file_data = count_lines_in_file(&file_desc);
+            let lines = file_data.lines;
+            result
+                .entry(file_data.extension)
+                .and_modify(|val| *val += lines)
+                .or_insert(lines);
+        } else if mdata.is_dir() {
+            let step = match count_lines_recursive(&file_desc.path()) {
+                Some(map) => map,
+                None => continue,
+            };
+
+            result.extend(step);
+        }
     }
-    process_hashtable(&result)
+    Some(result)
 }
 
 fn count_lines_in_file(file: &DirEntry) -> FileData {
@@ -89,10 +74,8 @@ fn count_lines_in_file(file: &DirEntry) -> FileData {
         Err(ref e) => {
             eprintln!("{}", e);
             return FileData {
-                extension: Format::ErrorOccured {
-                    message: e.to_string(),
-                    file: name.to_str().unwrap().to_string(),
-                },
+                path: name,
+                extension: Format::Other,
                 lines: 0,
             };
         }
@@ -100,7 +83,9 @@ fn count_lines_in_file(file: &DirEntry) -> FileData {
 
     // main line counting logic goes here
     let mut lines_counter = 0;
-    while current_file.read(&mut buf).unwrap() > 0 {
+    while let Ok(bytes) = current_file.read(&mut buf)
+        && bytes > 0
+    {
         // try to skip ELF executables as it makes no sense to count lines in binary files
         // whatsoever.
         // This approach is dumb and barely extendible
@@ -108,6 +93,7 @@ fn count_lines_in_file(file: &DirEntry) -> FileData {
         if buf[0..4] == ELF_SIGNATURE {
             break;
         }
+
         for character in buf {
             match &character {
                 b'\n' => lines_counter += 1,
@@ -116,10 +102,9 @@ fn count_lines_in_file(file: &DirEntry) -> FileData {
         }
     }
 
-    // println!("{lines_counter} lines in file {}", name.to_str().unwrap());
-
     FileData {
         extension: get_file_ext(file.path().extension()),
+        path: name,
         lines: lines_counter,
     }
 }
@@ -132,13 +117,19 @@ fn get_file_ext(ext: Option<&OsStr>) -> Format {
             .unwrap()
             .parse::<Format>()
             .unwrap(),
-        // TODO: Binary processing logic goes here
         None => Format::Other,
     }
 }
-fn process_hashtable(table: &HashMap<Format, usize>) -> String {
+fn count_lines_in_directory<T: AsRef<Path> + Debug + Into<PathBuf>>(path: T) -> String {
     let mut answer = String::new();
 
+    let table = match count_lines_recursive(&path) {
+        Some(map) => map,
+        None => {
+            eprintln!("There was an error reading target directory");
+            std::process::exit(1)
+        }
+    };
     for (format, lines) in table {
         let _ = writeln!(answer, "{} files: {lines}", format.match_to_str());
     }
@@ -146,19 +137,5 @@ fn process_hashtable(table: &HashMap<Format, usize>) -> String {
     answer
 }
 fn main() {
-    // let child = std::process::Command::new("sh")
-    //     .arg("-c")
-    //     .arg("wc -l test/*")
-    //     .stdout(Stdio::piped())
-    //     .stderr(Stdio::piped())
-    //     .output()?;
-    // println!("wc -l RESULTS:");
-    // std::io::stdout().write_all(&child.stdout)?;
-    // std::io::stdout().write_all(&child.stderr)?;
-    //
-    // println!("---------------------------------------------");
-    let a = count_lines_in_directory("test");
-    let err = count_lines_in_directory("Laksjdlakjs");
-    println!("{a}");
-    println!("{err}");
+    println!("{}", count_lines_in_directory("."))
 }
