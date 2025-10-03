@@ -146,17 +146,6 @@ fn process_hashtable(table: &HashMap<Format, usize>) -> String {
     answer
 }
 fn main() {
-    // let child = std::process::Command::new("sh")
-    //     .arg("-c")
-    //     .arg("wc -l test/*")
-    //     .stdout(Stdio::piped())
-    //     .stderr(Stdio::piped())
-    //     .output()?;
-    // println!("wc -l RESULTS:");
-    // std::io::stdout().write_all(&child.stdout)?;
-    // std::io::stdout().write_all(&child.stderr)?;
-    //
-    // println!("---------------------------------------------");
     let a = count_lines_in_directory("test");
     let err = count_lines_in_directory("Laksjdlakjs");
     println!("{a}");
