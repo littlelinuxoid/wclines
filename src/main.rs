@@ -137,5 +137,6 @@ fn count_lines_in_directory<T: AsRef<Path> + Debug + Into<PathBuf>>(path: T) -> 
     answer
 }
 fn main() {
-    println!("{}", count_lines_in_directory("test"))
+    let a = count_lines_in_directory("test");
+    println!("{a}")
 }
