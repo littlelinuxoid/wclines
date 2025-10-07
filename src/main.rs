@@ -7,6 +7,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
 };
+mod cli;
 mod format;
 mod table;
 use format::Format;
@@ -30,11 +31,15 @@ impl Default for FileData {
     }
 }
 
-fn count_lines_recursive<T: AsRef<Path> + Debug + Into<PathBuf>>(
-    path: &T,
-) -> Option<HashMap<Format, usize>> {
+fn count_lines_recursive<T: AsRef<Path> + Debug>(path: &T) -> Option<HashMap<Format, usize>> {
     let dir_contents = match fs::read_dir(&path) {
         Ok(dir) => dir.map(|item| item.unwrap()),
+        Err(ref e) if e.kind() == std::io::ErrorKind::NotADirectory => {
+            println!("Specified entry is a file, not directory, counting lines in it...");
+            let mut file = File::open(&path).unwrap();
+            println!("{} lines found", count_lines_in_file(&mut file),);
+            std::process::exit(0);
+        }
         Err(ref e) => {
             eprintln!("[ERROR] {:?}: {e}", path);
             return None;
@@ -48,7 +53,7 @@ fn count_lines_recursive<T: AsRef<Path> + Debug + Into<PathBuf>>(
     for file_desc in dir_contents {
         let mdata = file_desc.metadata().unwrap();
         if mdata.is_file() {
-            let file_data = count_lines_in_file(&file_desc);
+            let file_data = construct_filedata(&file_desc);
             let lines = file_data.lines;
             result
                 .entry(file_data.extension)
@@ -65,25 +70,10 @@ fn count_lines_recursive<T: AsRef<Path> + Debug + Into<PathBuf>>(
     }
     Some(result)
 }
-
-fn count_lines_in_file(file: &DirEntry) -> FileData {
+fn count_lines_in_file(file: &mut File) -> usize {
     let mut buf: [u8; _] = [0; IO_BUFSIZE + 1];
-    let name = file.path();
-    let mut current_file = match File::open(&name) {
-        Ok(f) => f,
-        Err(ref e) => {
-            eprintln!("{}", e);
-            return FileData {
-                path: name,
-                extension: Format::Other,
-                lines: 0,
-            };
-        }
-    };
-
-    // main line counting logic goes here
     let mut lines_counter = 0;
-    while let Ok(bytes) = current_file.read(&mut buf)
+    while let Ok(bytes) = file.read(&mut buf)
         && bytes > 0
     {
         // try to skip ELF executables as it makes no sense to count lines in binary files
@@ -101,9 +91,28 @@ fn count_lines_in_file(file: &DirEntry) -> FileData {
             }
         }
     }
+    lines_counter
+}
+
+fn construct_filedata(file: &DirEntry) -> FileData {
+    let name = file.path();
+    let mut current_file = match File::open(&name) {
+        Ok(f) => f,
+        Err(ref e) => {
+            eprintln!("{}", e);
+            return FileData {
+                path: name,
+                extension: Format::Other,
+                lines: 0,
+            };
+        }
+    };
+    let lines_counter = count_lines_in_file(&mut current_file);
+
+    // main line counting logic goes here
 
     FileData {
-        extension: get_file_ext(file.path().extension()),
+        extension: get_file_ext(name.extension()),
         path: name,
         lines: lines_counter,
     }
@@ -120,7 +129,7 @@ fn get_file_ext(ext: Option<&OsStr>) -> Format {
         None => Format::Other,
     }
 }
-fn count_lines_in_directory<T: AsRef<Path> + Debug + Into<PathBuf>>(path: T) -> String {
+fn count_lines_in_directory<T: AsRef<Path> + Debug>(path: T) -> String {
     let mut answer = String::new();
 
     let table = match count_lines_recursive(&path) {
@@ -137,6 +146,5 @@ fn count_lines_in_directory<T: AsRef<Path> + Debug + Into<PathBuf>>(path: T) -> 
     answer
 }
 fn main() {
-    let a = count_lines_in_directory("test");
-    println!("{a}")
+    println!("{}", count_lines_in_directory(cli::parseargs()))
 }
