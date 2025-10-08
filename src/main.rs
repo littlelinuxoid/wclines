@@ -35,9 +35,10 @@ fn count_lines_recursive<T: AsRef<Path> + Debug>(path: &T) -> Option<HashMap<For
     let dir_contents = match fs::read_dir(&path) {
         Ok(dir) => dir.map(|item| item.unwrap()),
         Err(ref e) if e.kind() == std::io::ErrorKind::NotADirectory => {
+            // this is pure garbage error handling lmfao
             println!("Specified entry is a file, not directory, counting lines in it...");
             let mut file = File::open(&path).unwrap();
-            println!("{} lines found", count_lines_in_file(&mut file),);
+            println!("{} lines found", count_lines_in_file(&mut file));
             std::process::exit(0);
         }
         Err(ref e) => {
@@ -146,5 +147,6 @@ fn count_lines_in_directory<T: AsRef<Path> + Debug>(path: T) -> String {
     answer
 }
 fn main() {
-    println!("{}", count_lines_in_directory(cli::parseargs()))
+    let args = cli::parseargs();
+    println!("{}", count_lines_in_directory(args))
 }
