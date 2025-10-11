@@ -18,9 +18,9 @@ const ELF_SIGNATURE: [u8; 4] = [0x7F, 0x45, 0x4C, 0x46];
 struct FileData {
     extension: Format,
     path: PathBuf,
-
     lines: usize,
 }
+
 impl Default for FileData {
     fn default() -> Self {
         Self {
