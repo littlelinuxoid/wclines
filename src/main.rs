@@ -17,8 +17,8 @@ const ELF_SIGNATURE: [u8; 4] = [0x7F, 0x45, 0x4C, 0x46];
 
 struct FileData {
     extension: Format,
-    path: PathBuf,
     lines: usize,
+    path: PathBuf,
 }
 
 impl Default for FileData {
@@ -66,6 +66,7 @@ fn count_lines_recursive<T: AsRef<Path> + Debug>(path: &T) -> Option<HashMap<For
                 None => continue,
             };
 
+            // this is probably bad and tedious
             result.extend(step);
         }
     }
@@ -121,6 +122,7 @@ fn construct_filedata(file: &DirEntry) -> FileData {
 
 fn get_file_ext(ext: Option<&OsStr>) -> Format {
     match ext {
+        // macro magic. I am extremely proud of that, honestly
         Some(val) => val
             .to_owned()
             .into_string()

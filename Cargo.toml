@@ -9,3 +9,4 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.5.48", features = ["derive"] }
 wcl-proc-macros = {path = "./wcl-proc-macros"}
+"tokio" = { version = "1.48.0", features = ["macros", "fs", "rt-multi-thread"]}
