@@ -132,7 +132,6 @@ pub fn matcher_derive(item: TokenStream) -> TokenStream {
                     #(#match_arms_to_str)*
                 }
             }
-
         }
 
         impl std::str::FromStr for #name {

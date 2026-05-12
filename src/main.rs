@@ -2,10 +2,11 @@
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    fmt::{Debug, Write},
+    fmt::Write,
     fs::{self, DirEntry, File},
     io::Read,
     path::{Path, PathBuf},
+    process::ExitCode,
 };
 mod cli;
 mod format;
@@ -31,25 +32,46 @@ impl Default for FileData {
     }
 }
 
-fn count_lines_recursive<T: AsRef<Path> + Debug>(path: &T) -> Option<HashMap<Format, usize>> {
-    let dir_contents = match fs::read_dir(&path) {
+fn count_lines_recursive<T: AsRef<Path>>(path: &T) -> Option<HashMap<Format, usize>> {
+    let dir_contents = match fs::read_dir(path) {
         Ok(dir) => dir.map(|item| item.unwrap()),
-        Err(ref e) if e.kind() == std::io::ErrorKind::NotADirectory => {
-            // this is pure garbage error handling lmfao
-            println!("Specified entry is a file, not directory, counting lines in it...");
-            let mut file = File::open(&path).unwrap();
-            println!("{} lines found", count_lines_in_file(&mut file));
-            std::process::exit(0);
-        }
+
         Err(ref e) => {
-            eprintln!("[ERROR] {:?}: {e}", path);
-            return None;
+            match e.kind() {
+                std::io::ErrorKind::NotADirectory => {
+                    // this is pure garbage error handling lmfao
+                    println!("Specified entry is a file, not directory, counting lines in it...");
+                    let mut file = File::open(path).unwrap();
+                    println!("{} lines found", count_lines_in_file(&mut file));
+                    return None
+                },
+
+                std::io::ErrorKind::NotFound => {
+                    eprintln!("Specified entry does not exist.");
+                    return None
+                }
+
+                std::io::ErrorKind::PermissionDenied => {
+                    eprintln!("This user does not have permissions to access the entry, aborting...");
+                    return None
+                }
+                _ => {
+                    eprintln!("This Error Should Not occur!");
+                    return None;
+                }
+
+            }
+
         }
+
     };
-    // IDEA:
+
+    // NOTE:
     // Split traversing into threads, probably?
-    // use hashmap, because why the fuck not?
+    // This is a good idea if the directory is somewhat large, otherwise creating threads becomes a
+    // bottleneck.
     let mut result: HashMap<Format, usize> = HashMap::new();
+    // use hashmap, because why the fuck not?
 
     for file_desc in dir_contents {
         let mdata = file_desc.metadata().unwrap();
@@ -61,6 +83,7 @@ fn count_lines_recursive<T: AsRef<Path> + Debug>(path: &T) -> Option<HashMap<For
                 .and_modify(|val| *val += lines)
                 .or_insert(lines);
         } else if mdata.is_dir() {
+
             let step = match count_lines_recursive(&file_desc.path()) {
                 Some(map) => map,
                 None => continue,
@@ -71,10 +94,11 @@ fn count_lines_recursive<T: AsRef<Path> + Debug>(path: &T) -> Option<HashMap<For
     }
     Some(result)
 }
-fn count_lines_in_file(file: &mut File) -> usize {
+
+fn count_lines_in_file(f: &mut File) -> usize {
     let mut buf: [u8; _] = [0; IO_BUFSIZE + 1];
-    let mut lines_counter = 0;
-    while let Ok(bytes) = file.read(&mut buf)
+    let mut counter = 0;
+    while let Ok(bytes) = f.read(&mut buf[..])
         && bytes > 0
     {
         // try to skip ELF executables as it makes no sense to count lines in binary files
@@ -86,17 +110,16 @@ fn count_lines_in_file(file: &mut File) -> usize {
         }
 
         for character in buf {
-            match &character {
-                b'\n' => lines_counter += 1,
-                _ => continue,
+            if character == b'\n' {
+                counter += 1
             }
         }
     }
-    lines_counter
+    counter
 }
 
-fn construct_filedata(file: &DirEntry) -> FileData {
-    let name = file.path();
+fn construct_filedata(f: &DirEntry) -> FileData {
+    let name = f.path();
     let mut current_file = match File::open(&name) {
         Ok(f) => f,
         Err(ref e) => {
@@ -108,9 +131,9 @@ fn construct_filedata(file: &DirEntry) -> FileData {
             };
         }
     };
-    let lines_counter = count_lines_in_file(&mut current_file);
 
     // main line counting logic goes here
+    let lines_counter = count_lines_in_file(&mut current_file);
 
     FileData {
         extension: get_file_ext(name.extension()),
@@ -120,6 +143,7 @@ fn construct_filedata(file: &DirEntry) -> FileData {
 }
 
 fn get_file_ext(ext: Option<&OsStr>) -> Format {
+
     match ext {
         Some(val) => val
             .to_owned()
@@ -130,23 +154,27 @@ fn get_file_ext(ext: Option<&OsStr>) -> Format {
         None => Format::Other,
     }
 }
-fn count_lines_in_directory<T: AsRef<Path> + Debug>(path: T) -> String {
+
+fn count_lines_in_directory<T: AsRef<Path>>(path: T) -> Result<(), std::io::Error> {
     let mut answer = String::new();
 
     let table = match count_lines_recursive(&path) {
         Some(map) => map,
         None => {
             eprintln!("There was an error reading target directory");
-            std::process::exit(1)
+            return Err(std::io::Error::other("Unexpected Error Occured"));
         }
     };
+
     for (format, lines) in table {
         let _ = writeln!(answer, "{} files: {lines}", format.match_to_str());
     }
 
-    answer
+    println!("{}", answer);
+    Ok(())
 }
-fn main() {
+
+fn main() -> Result<(), std::io::Error> {
     let args = cli::parseargs();
-    println!("{}", count_lines_in_directory(args))
+    count_lines_in_directory(args)
 }

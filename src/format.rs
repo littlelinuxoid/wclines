@@ -6,9 +6,6 @@ pub enum Format {
     Rust,
     B,
     C,
-    // Source code files for the D programming language have the same extension as make utility's
-    // dependency files and there is no real way to distinguish them without actively parsing the
-    // file which this program should not be bothered with.
     #[output("Standart ASCII Text")]
     Txt,
     Java,
@@ -35,5 +32,6 @@ pub enum Format {
     Python,
     #[output("TypeScript")]
     Ts,
+    Cringe,
     Other,
 }
